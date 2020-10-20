@@ -207,7 +207,7 @@ for which $y_i=1$ represents that respondent $i$ has an income higher than or eq
 $y_i=0$ otherwise. From this point on we will denote 
 $\mathbf{X}=(\mathbf{x}_1,\dots, \mathbf{x}_n)$ 
 as the matrix were observation $\mathbf{x}_j=(x_{j1}, \dots, x_{jp})^T$ has
-$p$ predictor features. In this particular case we have 4 predictor features.
+$p$ predictor features. In this particular case we have $p=4$ predictor features.
 
 The original question is then simplified to the problem of predicting the binary
 value $y$ given $\mathbf{x}$. An implicit assumption of a linear relationship is made here
