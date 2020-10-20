@@ -1,0 +1,428 @@
+---
+title: "DEBUNKING THE SIX FIGURE INCOME PROMISE"
+author: "Cesar Y. Villarreal Guzman"
+date: "October 19, 2020"
+output: pdf_document
+fontsize: 12pt
+sansfont: Calibri Light
+bibliography: biblio.bib
+abstract: "Based on the recent social media advertisement trend of financial courses, we investigate the likelihood of having an annual income higher than or equal to $100,000CAD given young adult males who are self employed and work on average less than 30-40 hours a week. To accomplish this we fitted an elastic net logistic regression model using the Canadian 2016 General Social Survey and concluded on the unlikeliness of this to happen."
+---
+
+```{r, include=FALSE}
+### Libraries ###
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(cowplot)
+# Load cleaned data
+gss <- read.csv("gss.csv")
+
+
+#### Generation of predictor variable plots
+### Sex plot
+sex_prop <- gss %>% group_by(sex) %>% summarise(n = n()) %>%
+  mutate(prop = 100 * (n / sum(n))) 
+
+p1 <- sex_prop %>%
+  ggplot(aes(x="", y=prop, fill=sex)) +
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start=0) + 
+  scale_fill_brewer(palette="Dark2") +
+  theme_void() + 
+  ylab("") + xlab("") + 
+  labs(title = "", fill="Gender ") +
+  geom_text(aes(label = paste0(round(prop), "%")), position = position_stack(vjust = 0.5), size = 4.7) +
+  theme(text = element_text(size=15))
+
+### Work hours plot
+work_prop <- subset(gss, gss$nhours_pweek != "VS") %>% 
+  group_by(nhours_pweek) %>% summarise(n = n()) %>%
+  mutate(prop = 100 * (n / sum(n)))
+
+p2 <- work_prop %>% ggplot(aes(x = "", y = prop, fill = nhours_pweek)) + 
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start = 0) +
+  scale_fill_brewer(palette = "Accent") +
+  theme_void() +
+  ylab("") + xlab("") + 
+  labs(title = "", fill="Work Hours") +
+  geom_text(aes(label = paste0(round(prop), "%")), position = position_stack(vjust = 0.5), angle=45, size = 4.7) +
+  theme(text = element_text(size=15))
+
+### Age group plot
+ageg_prop <- gss %>% group_by(resp_age_group) %>% summarise(n = n()) %>%
+  mutate(prop = 100 * (n / sum(n)))
+
+p3 <- ageg_prop %>% ggplot(aes(x = "", y = prop, fill = resp_age_group)) + 
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start = 0) +
+  scale_fill_brewer(palette = "Accent") +
+  theme_void() +
+  ylab("") + xlab("") + 
+  labs(title = "", fill="Age Groups") +
+  geom_text(aes(label = paste0(round(prop), "%")), position = position_stack(vjust = 0.5), angle=45, size = 4.7) +
+  theme(text = element_text(size=15))
+
+### Age group plot
+selfe_prop <- gss %>% group_by(self_empl) %>% summarise(n = n()) %>%
+  mutate(prop = 100 * (n / sum(n)))
+
+p4 <- selfe_prop %>% ggplot(aes(x = "", y = prop, fill = self_empl)) + 
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start = 0) +
+  scale_fill_brewer(palette = "Greens") +
+  theme_void() +
+  ylab("") + xlab("") + 
+  labs(title = "", fill="Self Employed") +
+  geom_text(aes(label = paste0(round(prop), "%")), position = position_stack(vjust = 0.5), angle=45, size = 4.7) +
+  theme(text = element_text(size=15))
+
+### Income plot
+income_prop <- gss %>% group_by(income) %>% summarise(n = n()) %>%
+  mutate(prop = 100 * (n / sum(n)))
+
+pincome <- income_prop %>% ggplot(aes(x = "", y = prop, fill = income)) + 
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start = 0) +
+  scale_fill_brewer(palette = "BrBG") +
+  theme_void() +
+  ylab("") + xlab("") + 
+  labs(title = "", fill = "Income")+
+  geom_text(aes(label = paste0(round(prop), "%")), position = position_stack(vjust = 0.5), angle=45) 
+```
+
+
+## Introduction
+
+The year 2015 marked the beginning of the boom of the online education industry,
+but more specifically financial education. The famous
+advertisement video "Here In My Garage" by Tai Lopez, [^1] which at the moment has 
+nearly 71 million views, displayed the immense potential of social media advertisement as
+a viable marketing strategy. This particular video created a movement of the so called
+"Financial Freedom" courses, which allegedly
+offer a formula, a recipe, to not only making a six figure income, but
+to do so by being self employed and working less time per week than the average.
+
+[^1]: Link to video: https://www.youtube.com/watch?v=Cv1RJTHf5fk&ab_channel=TaiLopez
+
+We would like to point out that this kind of "promises" are, in fact not a new trend, 
+there are many books that make such promises which where published 
+long before 2015. Some known authors include, 
+Robert Kiyosaki and Tim Ferriss. 
+In these past years we have seen new competitors
+enter this "Financial Freedom" market via YouTube and other social media platforms,
+we gave the example of Tai Lopez, but some other examples are Alex Becker and 
+Dan Lok. 
+
+In this investigation we answered the question: How likely are you
+to make a six figure income in Canada? Moreover we discuss on the validity of these "Financial
+Freedom" courses, since our results show that it is more likely that a young adult gets
+an acceptance offer to Harvard university than to make a six figure income. Moreover
+we are also interested in the number of worked hours per week, since most of these
+courses claim that it is possible to have a high income with working 4-20 hours
+per week. To be clear the range 4-20 is an average of many different advertisements on 
+this topic.
+
+Although there is no available evidence, one can make an educated guess based on 
+YouTube's viewership demographics that most of these ads are being targeted to
+young adult males, and hence the reason why focus on this gender for our
+discussion. However the model is fitted to work on any age group or gender.
+
+To generate results that help answer our question, we look at the 
+General Canadian Social Survey [@gss] the 2016 version, which 
+had as focus "Canadians at Work and Home", we elaborate more on this data set
+in the "Data" section. The main tool used for analysis in this investigation
+is the elastic-net logistic regression model. 
+
+## Data
+The General Social Survey (GSS), as per the "Users Guide",
+is a sample survey with cross-sectional design. 
+The target population includes all persons 15 years of age and older in Canada,
+excluding residents of the Yukon, Northwest Territories, and Nunavut and
+full-time residents of institutions.[^2] The survey uses a frame that combines
+telephone numbers with Statistics Canada’s Address Register. 
+
+[^2]: Households without telephones were excluded from the survey population.
+
+Sampling was done by dividing each of the ten provinces into strata with many
+of the census metropolitan areas considered as separate strata. Each record in 
+the survey frame was assigned to a stratum within its province. Then from each
+stratum a selection of records was selected by simple random sampling. 
+During collection, households that did not meet the eligibility criteria were 
+terminated after an initial set of questions. If the household was eligible then
+a respondent was randomly selected from each household to complete an electronic questionnaire
+or to respond to a telephone interview.
+
+The GSS aimed at collecting 20,000 samples but only achieved a sample size of $n=19,609$. 
+The overall response rate was 50.8%, a very high response rate for a survey of 
+this nature. Responses where adjusted using a weighting strategy which was followed
+by standard bootstrap weighting.
+
+The study, was divided into a first set of questions that had the purpose of 
+demographic classification, questions like age, sex, marital status, relationship
+of household members to respondent etc... The second section asked questions about
+life at work, life at home, work life balance and health, well-being and resilience.
+Income data was obtained through a linkage to tax data for respondents
+who did not object to it. 
+
+Data was retrieved from the Computing in the Humanities and Social Sciences (CHASS) 
+at the University of Toronto website. A subset of the data was selected and retrieved
+for this investigation. This subset included demographics, as well as income and work related
+variables. The resulting data set contained 94 columns/features and
+19609 observations. The data was cleaned by selecting wanted variables and 
+remapping code values to text. Variables used for this report were: sex, age group, 
+average number of work hours per week, income, and self employment. More information
+on how to retrieve this data set and the code used to clean it can be found in the Appendix.
+Figures 1 and 2 display the raw data used for the creation of the model.
+
+```{r, echo=FALSE, warning=FALSE, fig.height = 12, fig.width = 11, error=FALSE, fig.align = "center", message=FALSE, fig.cap="GSS Distributions of Predictor Variables"}
+# ggarrange(p1, p2, p3, p4, 
+#           labels = c("Distribution of Sex", "Distribution of Income", 
+#                      "Distribution of Age Groups", "Distribution of Self Employed Respondents"),
+#           ncol =2, nrow = 2 )
+
+ggdraw() +
+  draw_plot(p1, x = 0, y = .5, width = .5, height = .5) +
+  draw_plot(p4, x = .5, y = .5, width = .5, height = 0.5) +
+  draw_plot(p2, x = 0, y = 0, width = .5, height = 0.5) + 
+  draw_plot(p3, x= .5, y = 0, width = .5, height = 0.5) + 
+  draw_plot_label(label = c("Distribution of Gender", "Distribution of Weekly Worked Hours",
+                     "Distribution of Age Groups", "Distribution of Self Employed Respondents"), size = 15,
+                  x = c(0, 0, 0.5, 0.3), y = c(1, 0.5, 0.5, 1))
+```
+\pagebreak
+```{r, echo=FALSE, warning=FALSE, fig.height = 4, fig.width = 5, error=FALSE, fig.align = "center", message=FALSE, fig.cap="GSS Distributions of Income."}
+pincome
+```
+
+## Model
+
+In the introduction we outlined that we seek to model the likelihood of someone
+having a six figure income based on sex, age, number of hours worked per week
+and, if this individual is self employed. Fortunately, the GSS data set contains
+all of these variables except for age. To solve this issue we use the age group
+of respondents. Moreover, a new vector $\mathbf{y}=(y_1,\dots, y_n)$ was generated
+for which $y_i=1$ represents that respondent $i$ has an income higher than or equal to $100,000CAD and 
+$y_i=0$ otherwise. From this point on we will denote 
+$\mathbf{X}=(\mathbf{x}_1,\dots, \mathbf{x}_n)$ 
+as the matrix were observation $\mathbf{x}_j=(x_{j1}, \dots, x_{jp})^T$ has
+$p$ predictor features. In this particular case we have 4 predictor features.
+
+The original question is then simplified to the problem of predicting the binary
+value $y$ given $\mathbf{x}$. An implicit assumption of a linear relationship is made here
+to go along the research question and the opening discussion of the problem.
+Therefore, our model choice, which is perhaps the most used and
+suited for binary classification, is the logistic regression model. We assume the
+reader has some familiarity with this model.
+
+Logistic regression arises from the desire to model the posterior probability of the two classes $0$ 
+and $1$ via linear functions. Suppose that the probability of having a
+six figure income is equivalent to $p$, then the model has the
+form
+\[\log\frac{p}{1-p}=\beta_0+\beta^T\mathbf{x}\]
+here we assume $\beta=(\beta_1, \dots, \beta_p)^T$ is a vector of appropriate size for left multiplication
+with $\mathbf{x}$. Logistic regression models are usually fit by maximum likelihood.[@hastie_friedman_tisbshirani]
+
+In particular we use a regularized version of the logistic regression model. This is 
+because, generally speaking regularization tends to be beneficial for the predictive 
+performance of a model. There are three common methods for regression regularization:
+lasso [@tibshirani], ridge [@hoerl_kennard] and elastic net regression [@zou_hastie]. 
+
+Given strong prior knowledge it may be better to pick lasso or ridge in 
+place of elastic net. However, in absence of prior knowledge, 
+elastic net should be the preferred solution and our regularization method
+for this problem. The limitation here is that elastic net has significantly higher
+computational complexity and is therefore much slower than lasso or ridge. Both
+ridge and lasso represent viable alternatives to elastic net regularization and
+for the model as a whole.
+
+Elastic net regression combines both strengths and solves the limitations of lasso and ridge regression. 
+This is achieved by combining the $L_1$ and $L_2$ penalties. Following
+the notation used above, the log-likelihood for the conventional logistic regression model
+for $N$ examples is given by
+\[\ell(\beta_0, \beta)=\sum_{i=1}^Ny_i\log p + (1-y_i)\log(1-p)\]
+\[=\sum_{i=1}^Ny_i(\beta_0+\beta^T\mathbf{x}_i)-\log(1 + exp\{\beta_0+\beta^T\mathbf{x}_i\})\]
+then, the elastic net logistic regression model has the following
+log-likelihood for $N$ examples
+\[\ell_{elnet}(\beta_0, \beta)=\left[\sum_{i=1}^Ny_i(\beta_0+\beta^T\mathbf{x}_i)-\log(1 + exp\{\beta_0+\beta^T\mathbf{x}_i\})\right] - \left[\lambda_1\sum_{j=1}^p|\beta_j| + \lambda\sum_{j=1}^p\beta_j^2\right]\]
+in the equation above we assume that $\beta=(\beta_1,\dots, \beta_p)$. Also in this
+new equation, the value $\lambda_1\sum_{j=1}^p|\beta_j|$ is the $L_1$ regularization penalty, and
+similarly $\lambda\sum_{j=1}^p\beta_j^2$ the $L_2$ regularization penalty.
+We use this new function to compute the pair $(\hat{\beta_0}, \hat{\beta})$ given by
+\[(\hat{\beta_0}, \hat{\beta})=\text{arg}\max_{(\beta_0, \beta)} \ell_{elnet}(\beta_0, \beta)\]
+Or equivalently
+\[(\hat{\beta_0}, \hat{\beta})=\text{arg}\min_{(\beta_0, \beta)} -\ell_{elnet}(\beta_0, \beta)\]
+Typically algorithms that solve this optimization problem tend to converge since
+log-likelihood is concave.
+
+We use the implementation of this model found in the R package **glmnet** [@glmnet_cit].
+For the training phase we used a 80-20 train to test ratio split for 
+the GSS data set. That is 80% of the data was used to fit the model and the
+remaining 20% was used to evaluate the performance of the model. Since 
+all variables are categorical, we required the creation of several dummy binary
+variables, also known as "one-hot" encoding.
+
+```{r, include = FALSE}
+gss2 <- gss[, c("resp_age_group", "sex", "nhours_pweek", "self_empl", "income")]
+
+set.seed(12345)
+# Create a 80-20 train-test sample split
+train.sample <- gss2$income %>%
+  createDataPartition(p = 0.8, list = FALSE)
+
+# Create binary variable Y and remove income column
+gss2 <- gss2 %>%  mutate(income100 = ifelse(income == "$100k-$124,999" | income == "$125k+", 1, 0))
+gss2 <- gss2[, -5]
+
+# Split data set
+gss.train <- gss2[train.sample, ]
+gss.test <- gss2[-train.sample, ]
+
+# Define X and Y for training
+x <- model.matrix(income100~., gss.train)[,-1]
+y <- gss.train$income100
+
+# Find best lambda using cross-validation
+cv_elnet <- cv.glmnet(x, y, family = "binomial", alpha = 0.3)
+
+# Fit the final model on the training data
+gss_model <- glmnet(x, y, alpha=0.3, family="binomial", lambda = cv_elnet$lambda.min)
+
+# Test model on the test set
+x.test <- model.matrix(income100~., gss.test)[,-1]
+prob_predictions <- gss_model %>% predict(newx = x.test, type="response")
+
+# We pick a small threshold based on the proportions of people with high incomes
+predictions <- ifelse(prob_predictions > 0.1, 1, 0)
+
+# Select vector of responses for model evaluation
+y.test <- gss.test$income100
+
+# The function confusionMatrix creates a list of classification metrics
+# among them, a confusion matrix. Some other metrics include accuracy, precision
+# recall etc...
+accuracy <- mean(y.test == predictions)
+tmp_coeffs <- coef(gss_model)
+
+lvs <- c(1, 0)
+true <- factor(y.test, levels = lvs)
+pred <- factor(predictions, levels = lvs)
+
+# From the caret package create metrics for model evaluation
+metrics <- confusionMatrix(pred, true)
+```
+
+
+## Results
+```{r, echo=FALSE, }
+data.frame(name = tmp_coeffs@Dimnames[[1]][tmp_coeffs@i + 1], coefficient = tmp_coeffs@x) %>%
+  knitr::kable(digits = 2, col.names = c("Variable Name", "Coefficient"),
+               caption = "Coefficient Values for Fitted GSS Model")
+```
+
+Table 1 displays the fitted model for our classification problem. It is important
+to note that Table 1 does not include any standard errors of regression 
+coefficients or other estimated quantities. This is because as @glmnet_cit 
+explain in their implementation notes "...this package deliberately does not provide them. The reason for this is that standard errors are not very meaningful for strongly biased estimates such as arise from penalized estimation methods."
+
+The accuracy on the test set was of **`r round(accuracy * 100, digits=2)`%**,
+with sensitivity **`r round(100*metrics$byClass[["Sensitivity"]], digits=2)`%** and specificity
+**`r round(100* metrics$byClass[["Specificity"]], digits = 2)`%**. Sensitivity, in this problem,
+measures the proportion of high income individuals that are correctly identified, and
+specificity measures the proportion of non-high income individuals that are correctly identified.
+We also include a confusion matrix plot, Figure 3, of our model on the test set which can be found in the 
+"Discussion" section.
+
+
+```{r, echo=FALSE, warning=FALSE, fig.height = 4, fig.width = 5, error=FALSE, fig.align = "center", message=FALSE, fig.cap="Confusion Matrix of GSS Model on Test Set."}
+# Select confusion matrix
+table <- data.frame(metrics$table)
+
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "good", "bad")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, fill = goodbad, alpha = prop)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) +
+  scale_fill_manual(values = c(good = "green", bad = "red")) +
+  theme_minimal() +
+  xlim(rev(levels(table$Reference))) + 
+  xlab("True Values") + labs(fill = "GoodBad", alpha = "Proportion") +
+  theme(legend.position="none")
+```
+
+## Discussion
+
+In statistical terms, Figure 3 serves as evidence that our model lacked precision
+because of a high number of false positives.
+However, our achieved model accuracy is much better than chance which is closer to 50%.
+
+With regards to the coefficients, it is no surprise that the most significant values are
+for the older age groups. It is reasonable to assume that as one gets older the 
+chances of having a higher position at a company, or simply having profitable 
+investments is higher. It also no surprise the positive relationship between number of hours 
+and income. In a country like Canada where jobs are usually compensated based on 
+hourly work this is what's to be expected.
+
+What is interesting, however, is the little effect of the self employment
+variable on this model. The fact that the self employed group are 
+a minority in most societies displays itself in this result.
+
+Some of the weaknesses of our approach come from the limitations of using linear models 
+on an apparent non-linear problem.
+As an alternative, we suggest fitting a support vector machine model.
+This method has the benefit of being partially linear but breaking 
+its linearity with what is referred to as the "kernel trick". Another 
+alternative is to fit a decision tree model.
+
+Similarly, a limitation of our approach is that we do not posses any data on 
+entrepreneurs, who fit the demographic profiles. Some areas of future work
+are to sample a population of entrepreneurs and ask questions regarding the 
+amount of time it took to start generating a six figure income, assuming they
+already make six figures. We focused on young adult males leaving behind
+other genders. Another area of future work could be to apply the same research 
+question to females and compare the results. 
+
+Finally, as per the introduction, we answer the research question. Consider
+a young adult male in the age group 25-34 who is self 
+employed and who works less than the average of 30-40. Our model then estimates 
+that the probability of having a six figure income is of
+**`r round(prob_predictions[6] * 100, digits=2)`%**, a very unlikely outcome. 
+On the contrary we can say that our model shows evidence that the probability of having a high 
+income is increased given an older person, working more than the average and not being self employed.
+
+
+## Appendix
+Data was retrieved from the Computing in the Humanities and Social Sciences (CHASS) 
+at the University of Toronto website. In order to retrieve this data set from the 
+CHASS website, a valid University of Toronto email is required. Other academic 
+institutions offer this data set but instructions will not be included.
+
+The official link to the CHASS website is **http://dc.chass.utoronto.ca/myaccess.html**, on
+arrival to the site click on the option, located on the side bar, "SDA @ CHASS". 
+Login with your University of Toronto credentials. Select your language of choice 
+and on the keyboard click "Ctrl + f", Command for Mac users, and type "gss". Hit 
+enter and click on "General Social Survey". Pick a year and click on "data", then
+on the top bar, under "Download" click "Customized Subset". We recommend downloading
+a "csv" file together with the codebook. Our cleaning code does not require any
+data definitions file. To ensure our code works we advise to select "All" 
+variables. Variables of interest can be selected instead of "All" however our 
+code may not work. At the bottom click continue and download all files.
+
+All Code used for this project can be found here:
+
+
+**https://github.com/cesar-yoab/elnet_regression_R**
+
+---
+nocite: '@*'
+---
+
+\pagebreak
+\pagebreak
+
+## References
